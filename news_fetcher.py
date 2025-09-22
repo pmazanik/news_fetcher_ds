@@ -1,64 +1,31 @@
 #!/usr/bin/env python3
 """
-Main script with enhanced date checking for recent news
+Main script to fetch news from multiple sources and save to JSON
 """
 
 import time
-from datetime import datetime, timedelta
 from news_fetcher import get_fetcher, NEWS_SOURCES
 from news_fetcher.utils import setup_logging, create_output_directory, save_to_json, generate_filename
 from news_fetcher.config import OUTPUT_DIR, MAX_ARTICLES_PER_SOURCE
 
-def is_recent_article(article_data: dict, max_days_old: int = 2) -> bool:
-    """Check if article is recent"""
-    publish_date = article_data.get('publish_date')
-    if not publish_date:
-        return False
-
-    try:
-        if isinstance(publish_date, str):
-            # Try to parse various date formats
-            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%d %b %Y', '%b %d, %Y'):
-                try:
-                    publish_date = datetime.strptime(publish_date, fmt)
-                    break
-                except:
-                    continue
-
-        if isinstance(publish_date, datetime):
-            return (datetime.now() - publish_date).days <= max_days_old
-
-    except Exception as e:
-        print(f"Date parsing error: {e}")
-
-    return False
-
 def fetch_single_source(source, max_articles):
-    """Fetch news from a single source with recency check"""
+    """Fetch news from a single source"""
     try:
         print(f"📍 Processing {source.name}...")
         fetcher = get_fetcher(source.name, source.base_url, source.rss_url)
         if fetcher:
             articles = fetcher.fetch_news(max_articles)
-
-            # Filter for recent articles only
-            recent_articles = []
-            for article in articles:
-                if is_recent_article(article) or not article.get('publish_date'):
-                    recent_articles.append(article)
-
             result = {
                 'source': source.name,
-                'articles': recent_articles,
-                'count': len(recent_articles),
-                'total_fetched': len(articles)
+                'articles': articles,
+                'count': len(articles)
             }
-
-            if recent_articles:
-                print(f"✅ {source.name}: {len(recent_articles)} recent articles (out of {len(articles)} total)")
+            
+            if articles:
+                print(f"✅ {source.name}: {len(articles)} articles")
             else:
-                print(f"⚠️  {source.name}: No recent articles found ({len(articles)} total)")
-
+                print(f"❌ {source.name}: Failed to fetch articles")
+            
             return result
     except Exception as e:
         print(f"❌ {source.name}: Error - {e}")
@@ -103,21 +70,16 @@ def analyze_articles(all_news):
     """Analyze and display statistics about fetched articles"""
     total_articles = sum(source['count'] for source in all_news)
     
-    print(f"\nArticle Analysis:")
-    print(f"Total articles: {total_articles}")
+    print(f"\n📊 FETCHING SUMMARY")
+    print(f"Total articles fetched: {total_articles}")
     
     for source_data in all_news:
         articles = source_data['articles']
         if not articles:
             continue
             
-        avg_title_len = sum(len(art['title']) for art in articles) / len(articles)
-        avg_text_len = sum(len(art['text']) for art in articles) / len(articles)
-        
         print(f"\n{source_data['source']}:")
         print(f"  Articles: {source_data['count']}")
-        print(f"  Avg title length: {avg_title_len:.1f} chars")
-        print(f"  Avg text length: {avg_text_len:.1f} chars")
         
         # Count articles with authors
         has_authors = sum(1 for art in articles if art.get('authors'))
@@ -125,28 +87,29 @@ def analyze_articles(all_news):
 
 def main():
     """Main function"""
-    print("Starting news fetcher...")
-    print("Sources: BBC, CNN, The Guardian, AP News")
-    print("Target: 20 articles per source")
-    print("This may take a few minutes...")
-    print("-" * 50)
+    print("🚀 Starting news fetcher...")
+    print(f"📰 Sources: {[source.name for source in NEWS_SOURCES]}")
+    print(f"📊 Target: {MAX_ARTICLES_PER_SOURCE} articles per source")
+    print(f"💾 Output directory: {OUTPUT_DIR}")
+    print("⏰ This may take a few minutes...")
+    print("-" * 60)
     
     # Fetch all news
     all_news = fetch_all_news()
     
     if not all_news:
-        print("No news articles were fetched")
+        print("❌ No news articles were fetched")
         return
     
     # Save data
     total_articles = save_news_data(all_news)
     
-    print("\n" + "-" * 50)
-    print(f"COMPLETED! Fetched {total_articles} articles total")
-    print(f"Data saved to: {OUTPUT_DIR}/")
+    print("\n" + "-" * 60)
+    print(f"✅ COMPLETED! Fetched {total_articles} articles total")
+    print(f"💾 Data saved to: {OUTPUT_DIR}/")
     
     # Print summary
-    print("\nSUMMARY:")
+    print("\n📊 SUMMARY:")
     for source_data in all_news:
         status = "✓" if source_data['count'] > 0 else "✗"
         print(f"   {status} {source_data['source']}: {source_data['count']} articles")
@@ -154,7 +117,8 @@ def main():
     # Additional analysis
     analyze_articles(all_news)
     
-    print("\nCheck 'news_fetcher.log' for detailed logs.")
+    print(f"\n🎯 Next step: Run 'python analysis.py' to analyze articles with AI")
+    print("📋 Check 'news_fetcher.log' for detailed logs.")
 
 if __name__ == "__main__":
     main()

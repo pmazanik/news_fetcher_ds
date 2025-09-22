@@ -6,9 +6,7 @@ import requests
 from newspaper import Article
 import random
 import time
-import re
-from bs4 import BeautifulSoup
-from .config import USER_AGENTS, TIMEOUT
+from .config import USER_AGENTS, TIMEOUT, REQUEST_DELAY
 
 def setup_logging():
     """Setup logging configuration"""
@@ -27,37 +25,11 @@ def create_output_directory(directory: str):
         os.makedirs(directory)
         logging.info(f"Created directory: {directory}")
 
-#def save_to_json(data: list, filename: str):
-#    """Save data to JSON file"""
-#    try:
-#       with open(filename, 'w', encoding='utf-8') as f:
-#            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-#        logging.info(f"Saved {len(data)} articles to {filename}")
-#    except Exception as e:
-#        logging.error(f"Error saving to JSON: {e}")
-
 def save_to_json(data: list, filename: str):
-    """Save data to JSON file with metadata"""
+    """Save data to JSON file"""
     try:
-        # Check if data is already in the new format with metadata
-        if isinstance(data, dict) and 'articles' in data:
-            # Data is already in the correct format
-            json_data = data
-        else:
-            # Create new format with metadata
-            source = data[0]['source'] if data and isinstance(data, list) and len(data) > 0 else "unknown"
-            json_data = {
-                "metadata": {
-                    "generated_at": datetime.now().isoformat(),
-                    "total_articles": len(data),
-                    "source": source,
-                    "version": "1.0"
-                },
-                "articles": data
-            }
-        
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(json_data, f, indent=2, ensure_ascii=False, default=str)
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         logging.info(f"Saved {len(data)} articles to {filename}")
     except Exception as e:
         logging.error(f"Error saving to JSON: {e}")
@@ -90,47 +62,25 @@ def fetch_article_content(url: str, source_name: str) -> dict:
         article = Article(url)
         article.download()
         article.parse()
-
-        article_data = {
-            'title': article.title,
-            'text': article.text,
-            'publish_date': article.publish_date,
-            'authors': article.authors,
-            'url': url,
-            'source': source_name,
-            'summary': article.summary if hasattr(article, 'summary') else '',
-        }
-
-        # Validate article quality
-        if validate_article(article_data):
-            return article_data
+        
+        # Only return if we have substantial content
+        if article.text and len(article.text.strip()) > 200:
+            return {
+                'title': article.title,
+                'text': article.text,
+                'publish_date': article.publish_date,
+                'authors': article.authors,
+                'url': url,
+                'source': source_name,
+                'summary': article.summary if hasattr(article, 'summary') else '',
+            }
         return None
-
+        
     except Exception as e:
         logging.warning(f"Error fetching article {url}: {e}")
         return None
 
 def respectful_delay():
-    """Add random delay between requests"""
-    time.sleep(random.uniform(0.5, 1.5))
-
-def validate_article(article_data: dict) -> bool:
-    """Validate that article has meaningful content"""
-    if not article_data:
-        return False
-    
-    # Check for essential fields
-    required_fields = ['title', 'text', 'url']
-    for field in required_fields:
-        if not article_data.get(field):
-            return False
-    
-    # Check minimum content length
-    if len(article_data.get('text', '').strip()) < 200:
-        return False
-    
-    # Check title length
-    if len(article_data.get('title', '').strip()) < 10:
-        return False
-    
-    return True
+    """Add random delay between requests using configured delay"""
+    delay = random.uniform(REQUEST_DELAY * 0.5, REQUEST_DELAY * 1.5)
+    time.sleep(delay)
