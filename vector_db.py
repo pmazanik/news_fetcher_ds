@@ -180,7 +180,7 @@ Source: {analysis.get('original_source', 'Unknown')}
         try:
             response = openai.ChatCompletion.create(
                 model=self.llm_model,
-                temperature=0.0
+                temperature=0.0,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided news articles. Be concise and factual."},
                     {"role": "user", "content": f"Based on these news articles:\n\n{context}\n\nQuestion: {question}\n\nAnswer:"}
