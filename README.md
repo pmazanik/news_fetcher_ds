@@ -66,6 +66,10 @@ news_fetcher_ds/
 ├─ view_news.py            # pretty-print/inspect combined items
 ├─ requirements.txt        # dependancies list
 ├─ .env.example            # environment setting example file
+├─ basic_test.py
+├─ test_integration.py
+├─ test_performance.py
+├─ test_semantic.py
 └─ README.md
 ```
 ---
