@@ -17,6 +17,3 @@ langchain==0.0.346
 
 # Pre-compiled vector store (NO COMPILATION NEEDED)
 faiss-cpu==1.7.4
-
-# Remove ALL packages that require compilation:
-# annoy, hnswlib, chromadb, sentence-transformers, transformers, torch
