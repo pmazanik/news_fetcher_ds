@@ -7,6 +7,7 @@ import time
 import os
 from vector_db import PurePythonVectorDB
 from analysis import load_news_articles
+from news_fetcher.config import OUTPUT_DIR, ANALYSIS_DIR, VECTOR_DB_DIR
 
 def test_performance():
     """Test search performance with proper error handling"""
@@ -105,7 +106,7 @@ def test_database_health():
     vector_db = PurePythonVectorDB()
     
     # Check if data directory exists
-    data_dir = "vector_db"
+    data_dir = VECTOR_DB_DIR
     if not os.path.exists(data_dir):
         print("❌ Vector database directory not found")
         return False

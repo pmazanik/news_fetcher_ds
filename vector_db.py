@@ -9,15 +9,18 @@ import numpy as np
 from typing import List, Dict
 from dotenv import load_dotenv
 from analysis import SimpleNewsAnalyzer, load_news_articles
+from news_fetcher.config import VECTOR_DB_DIR, EMBEDDING_MODEL, MODEL
 
 load_dotenv()
 
 class PurePythonVectorDB:
     def __init__(self, persist_directory: str = "vector_db"):
-        self.persist_directory = persist_directory
+        self.persist_directory = persist_directory or VECTOR_DB_DIR
         self.documents = []
         self.embeddings = []
         self.metadata = []
+        self.embedding_model = EMBEDDING_MODEL
+        self.llm_model = MODEL
         
     def _get_openai_embedding(self, text: str) -> List[float]:
         """Get embedding from OpenAI API"""
@@ -26,7 +29,7 @@ class PurePythonVectorDB:
         try:
             response = openai.Embedding.create(
                 input=text,
-                model="text-embedding-ada-002",
+                model=self.embedding_model,
                 api_key=os.getenv("OPENAI_API_KEY")
             )
             return response['data'][0]['embedding']
@@ -176,7 +179,8 @@ Source: {analysis.get('original_source', 'Unknown')}
         
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+                model=self.llm_model,
+                temperature=0.0
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided news articles. Be concise and factual."},
                     {"role": "user", "content": f"Based on these news articles:\n\n{context}\n\nQuestion: {question}\n\nAnswer:"}

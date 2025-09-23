@@ -8,7 +8,7 @@ import random
 import time
 import re
 from bs4 import BeautifulSoup
-from .config import USER_AGENTS, TIMEOUT
+from .config import USER_AGENTS, TIMEOUT, REQUEST_DELAY
 
 def setup_logging():
     """Setup logging configuration"""
@@ -111,8 +111,9 @@ def fetch_article_content(url: str, source_name: str) -> dict:
         return None
 
 def respectful_delay():
-    """Add random delay between requests"""
-    time.sleep(random.uniform(0.5, 1.5))
+    """Add random delay between requests using configured delay"""
+    delay = random.uniform(REQUEST_DELAY * 0.5, REQUEST_DELAY * 1.5)
+    time.sleep(delay)
 
 def validate_article(article_data: dict) -> bool:
     """Validate that article has meaningful content"""

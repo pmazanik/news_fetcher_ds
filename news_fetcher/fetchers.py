@@ -8,7 +8,7 @@ from typing import List
 import logging
 import re
 from bs4 import BeautifulSoup
-from .config import USER_AGENTS, TIMEOUT
+from .config import USER_AGENTS, TIMEOUT, MAX_ARTICLES_PER_SOURCE
 from .utils import create_session, get_random_user_agent, respectful_delay
 import random
 
@@ -20,12 +20,14 @@ class BaseNewsFetcher:
         self.session = create_session()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def fetch_article_urls(self, max_articles: int = 20) -> List[str]:
+    def fetch_article_urls(self, max_articles: int = None) -> List[str]:
         """Fetch article URLs from RSS feed"""
+        max_articles = max_articles or MAX_ARTICLES_PER_SOURCE
         raise NotImplementedError("Subclasses must implement this method")
 
-    def fetch_news(self, max_articles: int = 20) -> List[dict]:
+    def fetch_news(self, max_articles: int = None) -> List[dict]:
         """Main method to fetch news articles"""
+        max_articles = max_articles or MAX_ARTICLES_PER_SOURCE
         self.logger.info(f"Fetching {max_articles} articles from {self.source_name}")
 
         urls = self.fetch_article_urls(max_articles)

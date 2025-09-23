@@ -6,6 +6,7 @@ Search interface using pure Python vector store
 import json
 from vector_db import PurePythonVectorDB
 from analysis import load_news_articles, SimpleNewsAnalyzer
+from news_fetcher.config import MODEL, EMBEDDING_MODEL, VECTOR_DB_DIR
 
 class PurePythonSearchEngine:
     def __init__(self):
@@ -22,6 +23,7 @@ class PurePythonSearchEngine:
             return False
         
         print(f"📊 Found {len(articles)} articles.")
+        print(f"🔧 Configuration - Model: {MODEL}, Embedding: {EMBEDDING_MODEL}")
         
         # First try to load existing analysis to save time and API calls
         try:

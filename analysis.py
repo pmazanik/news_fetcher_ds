@@ -10,15 +10,17 @@ import re
 from typing import List, Dict
 from dotenv import load_dotenv
 import openai
-from news_fetcher.config import OUTPUT_DIR
+from news_fetcher.config import OUTPUT_DIR, ANALYSIS_DIR, MODEL
 
 # Load environment variables
 load_dotenv()
 
 class SimpleNewsAnalyzer:
-    def __init__(self, model_name: str = "gpt-3.5-turbo", temperature: float = 0.0):
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        self.model_name = model_name
+    def __init__(self, model_name: str = None, temperature: float = 0.0):
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ValueError("OPENAI_API_KEY is required")
+        
+        self.model_name = model_name or MODEL
         self.temperature = temperature
     
     def analyze_article(self, article: Dict) -> Dict:
@@ -129,10 +131,10 @@ def load_news_articles() -> List[Dict]:
 
 def save_analysis_results(analysis_results: List[Dict], filename: str = "news_analysis.json"):
     """Save analysis results to JSON file"""
-    output_dir = "analysis_results"
-    os.makedirs(output_dir, exist_ok=True)
+    from news_fetcher.config import ANALYSIS_DIR
+    os.makedirs(ANALYSIS_DIR, exist_ok=True)
     
-    output_path = os.path.join(output_dir, filename)
+    output_path = os.path.join(ANALYSIS_DIR, filename)
     
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(analysis_results, f, indent=2, ensure_ascii=False)
@@ -188,7 +190,7 @@ def main():
     print(f"Found {len(articles)} articles for analysis")
     
     # Initialize analyzer
-    analyzer = SimpleNewsAnalyzer(model_name="gpt-3.5-turbo")
+    analyzer = SimpleNewsAnalyzer(model_name=MODEL)
     
     # Analyze articles (limit to 5 for testing)
     print("\nStarting analysis with OpenAI GPT...")
