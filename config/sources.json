@@ -1,0 +1,32 @@
+{
+    "sources": [
+        {
+            "name": "NASA Science",
+            "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+            "strategy": "rss",
+            "category": "science",
+            "full_text_required": true
+        },
+        {
+            "name": "BBC Science",
+            "url": "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+            "strategy": "rss",
+            "category": "science",
+            "full_text_required": true
+        },
+        {
+            "name": "Reuters Science",
+            "url": "https://www.reuters.com/rssFeed/scienceNews/",
+            "strategy": "rss",
+            "category": "science",
+            "full_text_required": true
+        },
+        {
+            "name": "Scientific American",
+            "url": "https://rss.sciam.com/scientificamerican/tech",
+            "strategy": "rss",
+            "category": "science",
+            "full_text_required": true
+        }
+    ]
+}

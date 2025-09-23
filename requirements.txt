@@ -1,20 +1,12 @@
-# Core web scraping
+# Dependencies for Python3.11
+
 requests==2.31.0
 beautifulsoup4==4.12.2
-newspaper3k==0.2.8
-lxml==4.9.3
 feedparser==6.0.10
-tqdm==4.66.1
+pypdf2==3.0.1
+newspaper3k==0.2.8
+aiohttp==3.8.5
+asyncio==3.4.3
 python-dateutil==2.8.2
-
-# OpenAI integration
-openai==0.28.1
-python-dotenv==1.0.0
-tiktoken==0.5.1
-
-# LangChain (core). Langchain is not used, but installation adds required dependancies.
-langchain==0.0.346
-
-# Pre-compiled vector store (NO COMPILATION NEEDED)
-faiss-cpu==1.7.4
+lxml==4.9.3
 
