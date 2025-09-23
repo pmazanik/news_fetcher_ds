@@ -19,7 +19,7 @@ class SimpleNewsAnalyzer:
     def __init__(self, model_name: str = None, temperature: float = 0.0):
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is required")
-        
+        else: openai.api_key = os.getenv("OPENAI_API_KEY")
         self.model_name = model_name or MODEL
         self.temperature = temperature
     
