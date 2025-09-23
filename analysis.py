@@ -89,7 +89,7 @@ Return ONLY valid JSON format, no other text.
         
         results = []
         for i, article in enumerate(articles):
-            print(f"Analyzing article {i+1}/{len(articles)}: {article.get('title', 'Unknown')[:50]}...")
+            print(f"Analyzing article {i+1}/{len(articles)}: {article.get('title', 'Unknown')[:100]}...")
             article_data = self.analyze_article(article)
             results.append(article_data)
             
