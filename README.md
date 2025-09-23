@@ -24,6 +24,7 @@ The pipeline fetches articles from multiple sources, summarizes/tags them with O
 * [Docker (Build & Run)](#docker-build--run)
 * [Troubleshooting](#troubleshooting)
 * [Roadmap](#roadmap)
+* [Costs](#costs)
 * [License](#license)
 
 ---
@@ -346,7 +347,13 @@ You can override envs inline instead of `--env-file .env`, e.g. `-e OPENAI_API_K
 - **User experience**  
   - Develop a lightweight **web UI** in addition to the CLI for easier browsing and search.  
   - Provide **Docker Compose** setups for one-command pipeline execution (fetch → analyze → search).
-   
+ 
+---
+
+## Costs
+
+With current limit as 20 articles per source approximate cost of full run is 0.09 USD
+
 ---
 
 ## License
