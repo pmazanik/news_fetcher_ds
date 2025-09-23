@@ -171,6 +171,21 @@ async def main():
         print(f"❌ Unexpected error: {e}")
         sys.exit(1)
 
+async def validate_sources():
+    """Validate all configured sources before fetching"""
+    from utils.feed_validator import validate_rss_feeds
+    
+    fetcher = NewsFetcher()
+    rss_feeds = []
+    
+    for source in fetcher.sources_config['sources']:
+        if source['strategy'] == 'rss':
+            rss_feeds.append(source['url'])
+    
+    if rss_feeds:
+        print("🔍 Validating RSS feeds...")
+        validate_rss_feeds(rss_feeds)
+
 if __name__ == "__main__":
     # Create necessary directories
     os.makedirs("config", exist_ok=True)

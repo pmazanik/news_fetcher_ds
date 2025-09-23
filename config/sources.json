@@ -15,18 +15,53 @@
             "full_text_required": true
         },
         {
-            "name": "Reuters Science",
-            "url": "https://www.reuters.com/rssFeed/scienceNews/",
+            "name": "ScienceDaily",
+            "url": "https://www.sciencedaily.com/rss/top/science.xml",
             "strategy": "rss",
             "category": "science",
             "full_text_required": true
         },
         {
-            "name": "Scientific American",
-            "url": "https://rss.sciam.com/scientificamerican/tech",
+            "name": "Phys.org",
+            "url": "https://phys.org/rss-feed/breaking/",
             "strategy": "rss",
             "category": "science",
             "full_text_required": true
+        },
+        {
+            "name": "Nature News",
+            "url": "https://www.nature.com/nature/articles?type=news",
+            "strategy": "web_crawler",
+            "category": "science",
+            "full_text_required": true,
+            "crawler_config": {
+                "article_selector": "article[data-test='article-list-item'] a",
+                "title_selector": "h1[data-test='article-title']",
+                "content_selector": "div[data-test='article-body'] p, .article__body p",
+                "base_url": "https://www.nature.com",
+                "requires_javascript": false
+            }
+        },
+        {
+            "name": "MIT News",
+            "url": "https://news.mit.edu/rss/topic/science",
+            "strategy": "rss",
+            "category": "science",
+            "full_text_required": true
+        },
+        {
+            "name": "ArXiv Recent Papers",
+            "url": "https://arxiv.org/list/cs.AI/recent",
+            "strategy": "web_crawler",
+            "category": "research",
+            "full_text_required": true,
+            "crawler_config": {
+                "article_selector": "dt span a[title='Abstract']",
+                "title_selector": "div.list-title mathjax",
+                "content_selector": "blockquote.abstract",
+                "base_url": "https://arxiv.org",
+                "requires_javascript": false
+            }
         }
     ]
 }
