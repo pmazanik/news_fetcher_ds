@@ -51,8 +51,6 @@ The pipeline fetches articles from multiple sources, summarizes/tags them with O
 3. **Embed + Index** — `vector_db.py` creates embeddings and writes a **single JSON** index into `vector_db/`.
 4. **Query** — `search_interface.py` loads the index and serves an **interactive CLI** (semantic search & simple RAG).
 
-(Utility scripts: `check_data.py`, `view_news.py`.) Files and package are visible in the V3 branch. ([GitHub][1])
-
 ---
 
 ## Repository Layout
@@ -262,7 +260,7 @@ vector_db/
 ### 2) Build
 
 ```bash
-docker build -t news-fetcher:v3 .
+docker build -t news-fetcher .
 ```
 
 ### 3) Run each stage (with persistent volumes)
@@ -281,7 +279,7 @@ docker run --rm -it \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
   -v "$(pwd)/vector_db:/app/vector_db" \
-  news-fetcher:v3 \
+  news-fetcher \
   python news_fetcher.py
 ```
 
@@ -293,7 +291,7 @@ docker run --rm -it \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
   -v "$(pwd)/vector_db:/app/vector_db" \
-  news-fetcher:v3 \
+  news-fetcher \
   python analysis.py
 ```
 
@@ -305,7 +303,7 @@ docker run --rm -it \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
   -v "$(pwd)/vector_db:/app/vector_db" \
-  news-fetcher:v3
+  news-fetcher
 # then type /search, /ask, /stats ...
 ```
 
