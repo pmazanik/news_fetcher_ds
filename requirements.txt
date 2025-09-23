@@ -12,8 +12,8 @@ openai==0.28.1
 python-dotenv==1.0.0
 tiktoken==0.5.1
 
-# LangChain (core)
-#langchain==0.0.346
+# LangChain (core). Langchain is not used, but installation adds required dependancies.
+langchain==0.0.346
 
 # Pre-compiled vector store (NO COMPILATION NEEDED)
 faiss-cpu==1.7.4
