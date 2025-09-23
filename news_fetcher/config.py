@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import List
 
 @dataclass
 class NewsSource:
@@ -7,7 +8,7 @@ class NewsSource:
     base_url: str
     rss_url: str
 
-# Configuration for news sources - REPLACED CNN with NPR
+# Configuration for news sources
 NEWS_SOURCES = [
     NewsSource(
         name="BBC",
@@ -15,9 +16,9 @@ NEWS_SOURCES = [
         rss_url="https://feeds.bbci.co.uk/news/rss.xml"
     ),
     NewsSource(
-        name="NPR",  # REPLACED CNN
+        name="NPR",
         base_url="https://www.npr.org",
-        rss_url="https://feeds.npr.org/1001/rss.xml"  # NPR News RSS
+        rss_url="https://feeds.npr.org/1001/rss.xml"
     ),
     NewsSource(
         name="The Guardian",
@@ -25,9 +26,9 @@ NEWS_SOURCES = [
         rss_url="https://www.theguardian.com/world/rss"
     ),
     NewsSource(
-        name="AP News",
-        base_url="https://apnews.com",
-        rss_url="https://apnews.com/feed"
+        name="Reuters",
+        base_url="https://www.reuters.com",
+        rss_url="https://www.reuters.com/world/reuters-wire-news/"
     )
 ]
 

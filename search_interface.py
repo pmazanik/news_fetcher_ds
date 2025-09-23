@@ -1,51 +1,54 @@
 #!/usr/bin/env python3
 """
-Search interface using pure Python vector store
+Search interface using LangChain for semantic search
 """
 
 import json
+
 from vector_db import PurePythonVectorDB
 from analysis import load_news_articles, SimpleNewsAnalyzer
+
 from news_fetcher.config import MODEL, EMBEDDING_MODEL, VECTOR_DB_DIR
 
-class PurePythonSearchEngine:
+class LangChainSearchEngine:
     def __init__(self):
-        self.vector_db = PurePythonVectorDB()
-        self.analyzer = SimpleNewsAnalyzer()
-    
+        self.vector_db = LangChainVectorDB()
+        self.analyzer = LangChainNewsAnalyzer()
+
     def initialize_database(self):
-        """Initialize the database with ALL articles"""
+        """Initialize the vector database with news articles"""
         print("📂 Loading news articles...")
         articles = load_news_articles()
-        
+
         if not articles:
-            print("❌ No articles found. Please run main.py first.")
+            print("❌ No articles found. Please run news_fetcher.py first.")
             return False
-        
+
         print(f"📊 Found {len(articles)} articles.")
         print(f"🔧 Configuration - Model: {MODEL}, Embedding: {EMBEDDING_MODEL}")
-        
+
         # First try to load existing analysis to save time and API calls
+
         try:
-            if self.vector_db.load_from_disk():
-                print("✅ Loaded existing analyzed data from disk")
-                # Debug: show how many articles are loaded
-                if hasattr(self.vector_db, 'embeddings'):
-                    print(f"📊 Database contains {len(self.vector_db.embeddings)} articles")
+            if self.vector_db.load_articles():
+                stats = self.vector_db.get_database_stats()
+                print(f"✅ Loaded existing database from {VECTOR_DB_DIR}")
+                print(f"   Documents: {stats.get('document_count', 0)} articles")
                 return True
         except Exception as e:
             print(f"ℹ️  No existing data found ({e}), analyzing fresh...")
-        
-        print("🔄 Analyzing articles with OpenAI...")
-        
-        # Analyze ALL articles - no limits
+
+        print("🔄 Analyzing articles with LangChain...")
+
+        # Analyze ALL articles
         analysis_results = self.analyzer.analyze_articles_batch(articles)
-        
+
         # Store in vector database
         success = self.vector_db.store_articles(analysis_results)
-        
+
         if success:
             print(f"✅ Database initialized with {len(analysis_results)} articles!")
+            print(f"💾 Saved to: {VECTOR_DB_DIR}")
             return True
         else:
             print("❌ Failed to initialize database")

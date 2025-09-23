@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-News fetchers with enhanced AP News handling
+News fetchers with enhanced configuration
 """
 
 import feedparser
 from typing import List
 import logging
+
 import re
 from bs4 import BeautifulSoup
+
 from .config import USER_AGENTS, TIMEOUT, MAX_ARTICLES_PER_SOURCE
 from .utils import create_session, get_random_user_agent, respectful_delay
-import random
 
 class BaseNewsFetcher:
     def __init__(self, source_name: str, base_url: str, rss_url: str):

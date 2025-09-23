@@ -5,7 +5,7 @@ Performance testing for the search system
 
 import time
 import os
-from vector_db import PurePythonVectorDB
+from vector_db import LangChainVectorDB
 from analysis import load_news_articles
 from news_fetcher.config import OUTPUT_DIR, ANALYSIS_DIR, VECTOR_DB_DIR
 
@@ -13,23 +13,25 @@ def test_performance():
     """Test search performance with proper error handling"""
     print("⏱️  Performance Testing")
     print("=" * 50)
+    print(f"📁 Using vector database from: {VECTOR_DB_DIR}")
     
     # Initialize vector DB
-    vector_db = PurePythonVectorDB()
+    vector_db = LangChainVectorDB()
     
     # Try to load existing data
-    if not vector_db.load_from_disk():
-        print("❌ No vector database found. Please run analysis.py first.")
+    if not vector_db.load_articles():
+        print(f"❌ No vector database found in {VECTOR_DB_DIR}. Please run analysis.py first.")
         print("💡 Run: python analysis.py")
         return
     
     # Check if we have data
-    if not hasattr(vector_db, 'embeddings') or not vector_db.embeddings:
-        print("❌ No embeddings found in database.")
-        print("💡 Make sure analysis.py completed successfully.")
+    stats = vector_db.get_database_stats()
+    if stats['status'] != 'loaded':
+        print("❌ Database not loaded properly.")
         return
     
-    print(f"✅ Loaded database with {len(vector_db.embeddings)} articles")
+    print(f"✅ Loaded database with {stats.get('document_count', 0)} articles")
+    print(f"🤖 Using model: {stats.get('embedding_model', 'Unknown')}")
     
     test_queries = [
         "technology",
@@ -60,14 +62,14 @@ def test_performance():
                 'query': query,
                 'time': response_time,
                 'results': len(results),
-                'similarity': results[0]['similarity'] if results else 0
+                'similarity': results[0]['similarity_score'] if results else 0
             })
             
             print(f"🔍 '{query}'")
             print(f"   ⏰ Time: {response_time:.3f} seconds")
             print(f"   📊 Results: {len(results)}")
             if results:
-                print(f"   🎯 Best similarity: {results[0]['similarity']:.3f}")
+                print(f"   🎯 Best similarity: {results[0]['similarity_score']:.3f}")
             print()
             
         except Exception as e:
@@ -102,8 +104,12 @@ def test_database_health():
     """Check if the database is properly set up"""
     print("🏥 Database Health Check")
     print("=" * 30)
+    print(f"📁 Checking directories:")
+    print(f"   News data: {OUTPUT_DIR}")
+    print(f"   Analysis: {ANALYSIS_DIR}")
+    print(f"   Vector DB: {VECTOR_DB_DIR}")
     
-    vector_db = PurePythonVectorDB()
+    vector_db = LangChainVectorDB()
     
     # Check if data directory exists
     data_dir = VECTOR_DB_DIR
@@ -119,13 +125,15 @@ def test_database_health():
     
     # Try to load data
     try:
-        if vector_db.load_from_disk():
-            if hasattr(vector_db, 'embeddings') and vector_db.embeddings:
+        if vector_db.load_articles():
+            stats = vector_db.get_database_stats()
+            if stats['status'] == 'loaded':
                 print(f"✅ Database health: GOOD")
-                print(f"📊 Articles loaded: {len(vector_db.embeddings)}")
+                print(f"📊 Articles loaded: {stats.get('document_count', 'Unknown')}")
+                print(f"🔧 Embedding model: {stats.get('embedding_model', 'Unknown')}")
                 return True
             else:
-                print("❌ Database loaded but no embeddings found")
+                print("❌ Database loaded but status not 'loaded'")
                 return False
         else:
             print("❌ Failed to load database")
@@ -139,9 +147,9 @@ def test_simple_search():
     print("🔍 Simple Search Test")
     print("=" * 30)
     
-    vector_db = PurePythonVectorDB()
+    vector_db = LangChainVectorDB()
     
-    if not vector_db.load_from_disk():
+    if not vector_db.load_articles():
         print("❌ Cannot load database")
         return
     
@@ -155,7 +163,7 @@ def test_simple_search():
         if results:
             print(f"✅ Search working! Found {len(results)} results")
             for i, result in enumerate(results):
-                print(f"   {i+1}. {result['title'][:50]}... (sim: {result['similarity']:.3f})")
+                print(f"   {i+1}. {result['title'][:50]}... (sim: {result['similarity_score']:.3f})")
         else:
             print("❌ No results found")
             
@@ -179,6 +187,6 @@ if __name__ == "__main__":
         test_performance()
     else:
         print("\n💡 Solution: Run these commands first:")
-        print("1. python main.py          # Fetch news articles")
-        print("2. python analysis.py      # Analyze articles with AI")
+        print("1. python news_fetcher.py    # Fetch news articles")
+        print("2. python analysis.py        # Analyze articles with AI")
         print("3. python test_performance.py  # Run performance tests")

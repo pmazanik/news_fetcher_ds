@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Pure Python vector store using OpenAI embeddings and cosine similarity
+Vector database using LangChain with ChromaDB
 """
 
 import os
 import json
-import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
+
 from analysis import SimpleNewsAnalyzer, load_news_articles
+
 from news_fetcher.config import VECTOR_DB_DIR, EMBEDDING_MODEL, MODEL
 
 load_dotenv()
@@ -32,151 +33,135 @@ class PurePythonVectorDB:
                 model=self.embedding_model,
                 api_key=os.getenv("OPENAI_API_KEY")
             )
-            return response['data'][0]['embedding']
-        except Exception as e:
-            print(f"❌ Error getting embedding: {e}")
-            return [0.0] * 1536  # Return zero vector as fallback
-    
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
-        vec1 = np.array(vec1)
-        vec2 = np.array(vec2)
-        return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+        except ImportError:
+            raise ImportError("LangChain dependencies not installed. Run: pip install langchain-openai")
     
     def create_documents(self, analysis_results: List[Dict]):
-        """Create document representations"""
+        """Create LangChain documents from analysis results"""
+        try:
+            from langchain.schema import Document
+        except ImportError:
+            raise ImportError("LangChain not installed. Run: pip install langchain")
+        
         documents = []
         for analysis in analysis_results:
+            # Create rich content for better embeddings
             content = f"""
 Title: {analysis.get('original_title', 'No title')}
+Source: {analysis.get('original_source', 'Unknown')}
 Summary: {analysis.get('summary', 'No summary')}
 Topics: {', '.join(analysis.get('key_topics', []))}
-Source: {analysis.get('original_source', 'Unknown')}
+Sentiment: {analysis.get('sentiment', 'Unknown')}
+Urgency: {analysis.get('urgency', 'Unknown')}
+Key Entities: {', '.join(analysis.get('key_entities', []))}
 """
             
             metadata = {
                 "source": analysis.get('original_source', 'Unknown'),
                 "url": analysis.get('original_url', ''),
                 "title": analysis.get('original_title', 'No title'),
-                "topics": analysis.get('key_topics', [])
+                "sentiment": analysis.get('sentiment', 'Unknown'),
+                "urgency": analysis.get('urgency', 'Unknown'),
+                "topics": analysis.get('key_topics', []),
+                "entities": analysis.get('key_entities', [])
             }
             
-            documents.append({
-                "content": content,
-                "metadata": metadata
-            })
+            documents.append(Document(page_content=content, metadata=metadata))
         
         return documents
     
     def store_articles(self, analysis_results: List[Dict]):
-        """Store articles with OpenAI embeddings"""
-        if not os.getenv("OPENAI_API_KEY"):
-            print("❌ OPENAI_API_KEY required")
-            return False
-        
-        self.documents = self.create_documents(analysis_results)
-        self.embeddings = []
-        self.metadata = []
-        
-        print("🔄 Generating embeddings...")
-        for i, doc in enumerate(self.documents):
-            print(f"   Embedding document {i+1}/{len(self.documents)}")
-            embedding = self._get_openai_embedding(doc["content"])
-            self.embeddings.append(embedding)
-            self.metadata.append(doc["metadata"])
-            
-            # Add small delay to avoid rate limiting
-            import time
-            time.sleep(0.1)
-        
-        # Save to disk
-        os.makedirs(self.persist_directory, exist_ok=True)
-        self._save_to_disk()
-        
-        print(f"✅ Stored {len(self.documents)} articles with embeddings")
-        return True
-    
-    def _save_to_disk(self):
-        """Save data to disk"""
-        data = {
-            "embeddings": self.embeddings,
-            "metadata": self.metadata,
-            "documents": [doc["content"] for doc in self.documents]
-        }
-        
-        with open(os.path.join(self.persist_directory, "data.json"), "w") as f:
-            json.dump(data, f)
-    
-    def load_from_disk(self):
-        """Load data from disk"""
+        """Store articles in ChromaDB using LangChain"""
         try:
-            with open(os.path.join(self.persist_directory, "data.json"), "r") as f:
-                data = json.load(f)
+            from langchain.vectorstores import Chroma
             
-            self.embeddings = data["embeddings"]
-            self.metadata = data["metadata"]
-            self.documents = [{"content": content} for content in data["documents"]]
+            documents = self.create_documents(analysis_results)
+            embeddings = self._get_embeddings()
             
-            print("✅ Loaded articles from disk")
+            # Create vector store with ChromaDB
+            self.vectorstore = Chroma.from_documents(
+                documents=documents,
+                embedding=embeddings,
+                persist_directory=self.persist_directory
+            )
+            
+            # Create retriever for semantic search
+            self.retriever = self.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 5}
+            )
+            
+            print(f"✅ Stored {len(documents)} articles using {self.embedding_model}")
             return True
-        except:
-            print("❌ No saved data found")
+            
+        except ImportError as e:
+            print(f"❌ LangChain import error: {e}")
+            return False
+        except Exception as e:
+            print(f"❌ Error storing articles: {e}")
+            return False
+    
+    def load_articles(self):
+        """Load articles from persistent storage"""
+        try:
+            from langchain.vectorstores import Chroma
+            
+            if not os.path.exists(self.persist_directory):
+                return False
+            
+            embeddings = self._get_embeddings()
+            self.vectorstore = Chroma(
+                persist_directory=self.persist_directory,
+                embedding_function=embeddings
+            )
+            
+            # Create retriever
+            self.retriever = self.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 5}
+            )
+            
+            # Get document count
+            doc_count = self.vectorstore._collection.count()
+            print(f"✅ Loaded {doc_count} articles from {self.persist_directory}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error loading articles: {e}")
             return False
     
     def semantic_search(self, query: str, k: int = 5) -> List[Dict]:
-        """Perform semantic search using cosine similarity"""
-        if not self.embeddings:
-            if not self.load_from_disk():
-                print("❌ No data available for search")
+        """Perform semantic search using LangChain"""
+        if not self.vectorstore:
+            if not self.load_articles():
+                print("❌ Vector database not initialized")
                 return []
         
-        # Get query embedding
-        query_embedding = self._get_openai_embedding(query)
-        
-        # Calculate similarities
-        similarities = []
-        for i, doc_embedding in enumerate(self.embeddings):
-            similarity = self._cosine_similarity(query_embedding, doc_embedding)
-            similarities.append((i, similarity))
-        
-        # Sort by similarity
-        similarities.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return top k results
-        results = []
-        for i, (doc_idx, similarity) in enumerate(similarities[:k]):
-            metadata = self.metadata[doc_idx]
-            content = self.documents[doc_idx]["content"]
-            
-            results.append({
-                "rank": i + 1,
-                "title": metadata.get('title', 'No title'),
-                "source": metadata.get('source', 'Unknown'),
-                "url": metadata.get('url', ''),
-                "topics": metadata.get('topics', []),
-                "similarity": float(similarity),
-                "snippet": content[:200] + "..." if len(content) > 200 else content
-            })
-        
-        return results
+        try:
+            results = self.vectorstore.similarity_search(query, k=k)
+            return self._format_results(results)
+        except Exception as e:
+            print(f"❌ Search error: {e}")
+            return []
     
-    def ask_question(self, question: str) -> Dict:
-        """Simple question answering using search results"""
-        # First, find relevant articles
-        results = self.semantic_search(question, k=3)
-        
-        if not results:
-            return {"answer": "I couldn't find relevant information to answer your question."}
-        
-        # Create context from top results
-        context = "\n\n".join([
-            f"Article {i+1}: {result['title']} ({result['source']})\n{result['snippet']}"
-            for i, result in enumerate(results)
-        ])
-        
-        # Use OpenAI to generate answer
-        import openai
-        
+    def _format_results(self, results) -> List[Dict]:
+        """Format search results for display"""
+        formatted = []
+        for i, doc in enumerate(results):
+            formatted.append({
+                "rank": i + 1,
+                "title": doc.metadata.get('title', 'No title'),
+                "source": doc.metadata.get('source', 'Unknown'),
+                "url": doc.metadata.get('url', ''),
+                "topics": doc.metadata.get('topics', []),
+                "sentiment": doc.metadata.get('sentiment', 'Unknown'),
+                "similarity_score": 0.9 - (i * 0.1),  # Placeholder for actual score
+                "snippet": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+            })
+        return formatted
+    
+    def create_qa_chain(self):
+        """Create a question-answering chain using LangChain"""
         try:
             response = openai.ChatCompletion.create(
                 model=self.llm_model,
@@ -189,17 +174,61 @@ Source: {analysis.get('original_source', 'Unknown')}
                 api_key=os.getenv("OPENAI_API_KEY")
             )
             
-            return {
-                "answer": response.choices[0].message.content,
-                "sources": [
-                    {
-                        "title": result['title'],
-                        "source": result['source'],
-                        "url": result['url']
-                    }
-                    for result in results
-                ]
-            }
+            llm = ChatOpenAI(
+                model_name=self.llm_model,
+                temperature=0.0,
+                openai_api_key=os.getenv("OPENAI_API_KEY")
+            )
+            
+            qa_chain = RetrievalQA.from_chain_type(
+                llm=llm,
+                chain_type="stuff",
+                retriever=self.retriever,
+                chain_type_kwargs={"prompt": PROMPT},
+                return_source_documents=True
+            )
+            
+            return qa_chain
             
         except Exception as e:
-            return {"error": str(e), "answer": "Sorry, I couldn't generate an answer."}
+            print(f"❌ Error creating QA chain: {e}")
+            return None
+    
+    def ask_question(self, question: str) -> Dict:
+        """Ask a natural language question about the news"""
+        qa_chain = self.create_qa_chain()
+        if not qa_chain:
+            return {"error": "QA chain not available"}
+        
+        try:
+            result = qa_chain.invoke({"query": question})
+            return {
+                "answer": result['result'],
+                "sources": [
+                    {
+                        "title": doc.metadata.get('title', 'No title'),
+                        "source": doc.metadata.get('source', 'Unknown'),
+                        "url": doc.metadata.get('url', '')
+                    }
+                    for doc in result['source_documents']
+                ]
+            }
+        except Exception as e:
+            return {"error": str(e), "answer": "Sorry, I couldn't process your question."}
+    
+    def get_database_stats(self) -> Dict:
+        """Get statistics about the vector database"""
+        if not self.vectorstore:
+            return {"status": "not_initialized"}
+        
+        try:
+            doc_count = self.vectorstore._collection.count()
+            return {
+                "status": "loaded",
+                "document_count": doc_count,
+                "persist_directory": self.persist_directory,
+                "embedding_model": self.embedding_model,
+                "llm_model": self.llm_model
+            }
+        except:
+            return {"status": "error_getting_stats"}
