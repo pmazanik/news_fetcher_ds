@@ -1,205 +1,117 @@
 #!/usr/bin/env python3
 """
-Pure Python vector store using OpenAI embeddings and cosine similarity
+vector_db.py
+Stage 3: Build and query a real vector database (Qdrant) using LangChain.
+
+- Reads latest analysis_results/*.jsonl
+- Embeds with OpenAIEmbeddings
+- Upserts into Qdrant (payload contains metadata)
+- Exposes PureQdrantVectorDB with .build(), .search(), .stats()
 """
 
-import os
+from __future__ import annotations
 import json
-import numpy as np
-from typing import List, Dict
+import os
+from pathlib import Path
+from typing import Any
+
 from dotenv import load_dotenv
-from analysis import SimpleNewsAnalyzer, load_news_articles
-from news_fetcher.config import VECTOR_DB_DIR, EMBEDDING_MODEL, MODEL
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Qdrant as LCQdrant
+from langchain.docstore.document import Document
 
 load_dotenv()
 
-class PurePythonVectorDB:
-    def __init__(self, persist_directory: str = "vector_db"):
-        self.persist_directory = persist_directory or VECTOR_DB_DIR
-        self.documents = []
-        self.embeddings = []
-        self.metadata = []
-        self.embedding_model = EMBEDDING_MODEL
-        self.llm_model = MODEL
-        
-    def _get_openai_embedding(self, text: str) -> List[float]:
-        """Get embedding from OpenAI API"""
-        import openai
-        
-        try:
-            response = openai.Embedding.create(
-                input=text,
-                model=self.embedding_model,
-                api_key=os.getenv("OPENAI_API_KEY")
+ANALYSIS_DIR = Path(os.getenv("ANALYSIS_DIR", "analysis_results"))
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
+COLLECTION = os.getenv("QDRANT_COLLECTION", "news_articles")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+class PureQdrantVectorDB:
+    def __init__(self) -> None:
+        self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        self.embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+        self._vs = None
+
+    def _ensure_collection(self, dim: int = 1536) -> None:
+        if COLLECTION not in [c.name for c in self.client.get_collections().collections]:
+            self.client.create_collection(
+                collection_name=COLLECTION,
+                vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
             )
-            return response['data'][0]['embedding']
-        except Exception as e:
-            print(f"❌ Error getting embedding: {e}")
-            return [0.0] * 1536  # Return zero vector as fallback
-    
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
-        vec1 = np.array(vec1)
-        vec2 = np.array(vec2)
-        return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-    
-    def create_documents(self, analysis_results: List[Dict]):
-        """Create document representations"""
-        documents = []
-        for analysis in analysis_results:
-            content = f"""
-Title: {analysis.get('original_title', 'No title')}
-Summary: {analysis.get('summary', 'No summary')}
-Topics: {', '.join(analysis.get('key_topics', []))}
-Source: {analysis.get('original_source', 'Unknown')}
-"""
-            
-            metadata = {
-                "source": analysis.get('original_source', 'Unknown'),
-                "url": analysis.get('original_url', ''),
-                "title": analysis.get('original_title', 'No title'),
-                "topics": analysis.get('key_topics', [])
-            }
-            
-            documents.append({
-                "content": content,
-                "metadata": metadata
+
+    def _latest_file(self) -> Path | None:
+        files = sorted(ANALYSIS_DIR.glob("*.jsonl"), reverse=True)
+        return files[0] if files else None
+
+    def build(self) -> dict[str, Any]:
+        path = self._latest_file()
+        if not path:
+            raise FileNotFoundError("No analysis_results/*.jsonl found")
+
+        docs: list[Document] = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                rec = json.loads(line)
+                text = rec.get("summary") or rec.get("description") or rec.get("title") or ""
+                content = f"{rec.get('title','')}\n\n{text}"
+                meta = {
+                    "id": rec["id"],
+                    "source": rec.get("source"),
+                    "url": rec.get("url"),
+                    "published_at": rec.get("published_at"),
+                    "topics": rec.get("topics") or [],
+                    "sentiment": rec.get("sentiment") or "Neutral",
+                }
+                docs.append(Document(page_content=content, metadata=meta))
+
+        # Create collection (Qdrant auto-detect dims from first embedding if not specified by LC)
+        self._ensure_collection()
+        self._vs = LCQdrant.from_documents(
+            documents=docs,
+            embedding=self.embeddings,
+            url=QDRANT_URL,
+            prefer_grpc=False,
+            api_key=QDRANT_API_KEY,
+            collection_name=COLLECTION,
+        )
+        return {"count": len(docs), "collection": COLLECTION}
+
+    def _vs_or_raise(self):
+        if self._vs is None:
+            # lazy load vectorstore handle for querying
+            self._vs = LCQdrant(
+                client=self.client, collection_name=COLLECTION, embeddings=self.embeddings
+            )
+        return self._vs
+
+    def search(self, query: str, k: int = 5, **filters) -> list[dict]:
+        vs = self._vs_or_raise()
+        docs = vs.similarity_search(query, k=k)
+        out = []
+        for d in docs:
+            out.append({
+                "text": d.page_content,
+                "score": getattr(d, "score", None),
+                **(d.metadata or {})
             })
-        
-        return documents
-    
-    def store_articles(self, analysis_results: List[Dict]):
-        """Store articles with OpenAI embeddings"""
-        if not os.getenv("OPENAI_API_KEY"):
-            print("❌ OPENAI_API_KEY required")
-            return False
-        
-        self.documents = self.create_documents(analysis_results)
-        self.embeddings = []
-        self.metadata = []
-        
-        print("🔄 Generating embeddings...")
-        for i, doc in enumerate(self.documents):
-            print(f"   Embedding document {i+1}/{len(self.documents)}")
-            embedding = self._get_openai_embedding(doc["content"])
-            self.embeddings.append(embedding)
-            self.metadata.append(doc["metadata"])
-            
-            # Add small delay to avoid rate limiting
-            import time
-            time.sleep(0.1)
-        
-        # Save to disk
-        os.makedirs(self.persist_directory, exist_ok=True)
-        self._save_to_disk()
-        
-        print(f"✅ Stored {len(self.documents)} articles with embeddings")
-        return True
-    
-    def _save_to_disk(self):
-        """Save data to disk"""
-        data = {
-            "embeddings": self.embeddings,
-            "metadata": self.metadata,
-            "documents": [doc["content"] for doc in self.documents]
+        return out
+
+    def stats(self) -> dict[str, Any]:
+        info = self.client.get_collection(COLLECTION)
+        return {
+            "collection": COLLECTION,
+            "vectors_count": info.vectors_count,
+            "points_count": info.points_count,
+            "status": str(info.status),
         }
-        
-        with open(os.path.join(self.persist_directory, "data.json"), "w") as f:
-            json.dump(data, f)
-    
-    def load_from_disk(self):
-        """Load data from disk"""
-        try:
-            with open(os.path.join(self.persist_directory, "data.json"), "r") as f:
-                data = json.load(f)
-            
-            self.embeddings = data["embeddings"]
-            self.metadata = data["metadata"]
-            self.documents = [{"content": content} for content in data["documents"]]
-            
-            print("✅ Loaded articles from disk")
-            return True
-        except:
-            print("❌ No saved data found")
-            return False
-    
-    def semantic_search(self, query: str, k: int = 5) -> List[Dict]:
-        """Perform semantic search using cosine similarity"""
-        if not self.embeddings:
-            if not self.load_from_disk():
-                print("❌ No data available for search")
-                return []
-        
-        # Get query embedding
-        query_embedding = self._get_openai_embedding(query)
-        
-        # Calculate similarities
-        similarities = []
-        for i, doc_embedding in enumerate(self.embeddings):
-            similarity = self._cosine_similarity(query_embedding, doc_embedding)
-            similarities.append((i, similarity))
-        
-        # Sort by similarity
-        similarities.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return top k results
-        results = []
-        for i, (doc_idx, similarity) in enumerate(similarities[:k]):
-            metadata = self.metadata[doc_idx]
-            content = self.documents[doc_idx]["content"]
-            
-            results.append({
-                "rank": i + 1,
-                "title": metadata.get('title', 'No title'),
-                "source": metadata.get('source', 'Unknown'),
-                "url": metadata.get('url', ''),
-                "topics": metadata.get('topics', []),
-                "similarity": float(similarity),
-                "snippet": content[:200] + "..." if len(content) > 200 else content
-            })
-        
-        return results
-    
-    def ask_question(self, question: str) -> Dict:
-        """Simple question answering using search results"""
-        # First, find relevant articles
-        results = self.semantic_search(question, k=3)
-        
-        if not results:
-            return {"answer": "I couldn't find relevant information to answer your question."}
-        
-        # Create context from top results
-        context = "\n\n".join([
-            f"Article {i+1}: {result['title']} ({result['source']})\n{result['snippet']}"
-            for i, result in enumerate(results)
-        ])
-        
-        # Use OpenAI to generate answer
-        import openai
-        
-        try:
-            response = openai.ChatCompletion.create(
-                model=self.llm_model,
-                temperature=0.0,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided news articles. Be concise and factual."},
-                    {"role": "user", "content": f"Based on these news articles:\n\n{context}\n\nQuestion: {question}\n\nAnswer:"}
-                ],
-                max_tokens=500,
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-            
-            return {
-                "answer": response.choices[0].message.content,
-                "sources": [
-                    {
-                        "title": result['title'],
-                        "source": result['source'],
-                        "url": result['url']
-                    }
-                    for result in results
-                ]
-            }
-            
-        except Exception as e:
-            return {"error": str(e), "answer": "Sorry, I couldn't generate an answer."}
+
+if __name__ == "__main__":
+    db = PureQdrantVectorDB()
+    res = db.build()
+    print("Built:", res)
+    print("Stats:", db.stats())
+    print("Sample search:", db.search("rate cuts and inflation", k=3))

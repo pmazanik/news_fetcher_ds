@@ -1,20 +1,28 @@
-# Core web scraping
-requests==2.31.0
-beautifulsoup4==4.12.2
-newspaper3k==0.2.8
-lxml==4.9.3
-feedparser==6.0.10
-tqdm==4.66.1
-python-dateutil==2.8.2
+# Core runtime
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.5.2
+httpx==0.27.2
+tenacity==9.0.0
+structlog==24.4.0
+tqdm==4.66.5
+ujson==5.10.0
 
-# OpenAI integration
-openai==0.28.1
-python-dotenv==1.0.0
-tiktoken==0.5.1
+# OpenAI
+openai==1.46.0
 
-# LangChain (core). Langchain is not used, but installation adds required dependancies.
-langchain==0.0.346
+# LangChain (pin to stable)
+langchain==0.2.16
+langchain-community==0.2.9
+langchain-openai==0.1.23
 
-# Pre-compiled vector store (NO COMPILATION NEEDED)
-faiss-cpu==1.7.4
+# Vector DB
+qdrant-client==1.12.2
 
+# CLI niceties
+rich==13.9.2
+typer==0.12.5
+
+# Tests
+pytest==8.3.3
+pytest-asyncio==0.24.0

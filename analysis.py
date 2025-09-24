@@ -1,213 +1,92 @@
 #!/usr/bin/env python3
 """
-News Article Analysis using OpenAI GPT models (without LangChain)
+analysis.py
+Stage 2: Use LLM to enrich items with summary, topics, sentiment.
+
+- LangChain ChatOpenAI pipeline
+- Batching + retries
+- Writes JSONL to analysis_results/
 """
 
-import os
+from __future__ import annotations
 import json
-import glob
-import re
-from typing import List, Dict
-from dotenv import load_dotenv
-import openai
-from news_fetcher.config import OUTPUT_DIR, ANALYSIS_DIR, MODEL
+import os
+from pathlib import Path
+from typing import Iterable
 
-# Load environment variables
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+from langchain_openai import ChatOpenAI
+from langchain.schema import HumanMessage
+from langchain_core.prompts import ChatPromptTemplate
+
 load_dotenv()
 
-class SimpleNewsAnalyzer:
-    def __init__(self, model_name: str = None, temperature: float = 0.0):
-        if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError("OPENAI_API_KEY is required")
-        else: openai.api_key = os.getenv("OPENAI_API_KEY")
-        self.model_name = model_name or MODEL
-        self.temperature = temperature
-    
-    def analyze_article(self, article: Dict) -> Dict:
-        """Analyze a single article using GPT"""
-        try:
-            prompt = f"""
-Analyze this news article and provide JSON output with these exact fields:
-- "summary": concise summary of main points (2-3 sentences)
-- "key_topics": list of 3-5 main topics as strings
-- "sentiment": one of: "positive", "negative", "neutral"
-- "urgency": one of: "high", "medium", "low" 
-- "key_entities": list of important people, organizations, or locations
+INPUT_DIR = Path(os.getenv("OUTPUT_DIR", "news_data"))
+OUT_DIR = Path(os.getenv("ANALYSIS_DIR", "analysis_results"))
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-ARTICLE TITLE: {article.get('title', 'No title')}
-ARTICLE CONTENT: {article.get('text', '')[:3000]}
+MODEL = os.getenv("MODEL", "gpt-4o-mini")
 
-Return ONLY valid JSON format, no other text.
-"""
-            
-            response = openai.ChatCompletion.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "You are a news analyst. Return only valid JSON format."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.temperature
-            )
-            
-            # Extract and parse JSON from response
-            content = response.choices[0].message.content
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            
-            if json_match:
-                analysis = json.loads(json_match.group())
-                return {
-                    **analysis,
-                    "original_title": article.get('title'),
-                    "original_url": article.get('url'),
-                    "original_source": article.get('source')
-                }
-            else:
-                return {
-                    "summary": "Analysis failed - JSON parsing error",
-                    "key_topics": [],
-                    "sentiment": "unknown",
-                    "urgency": "unknown",
-                    "key_entities": [],
-                    "error": "Could not parse JSON from response"
-                }
-            
-        except Exception as e:
-            print(f"Error analyzing article: {e}")
-            return {
-                "summary": "Analysis failed",
-                "key_topics": [],
-                "sentiment": "unknown",
-                "urgency": "unknown",
-                "key_entities": [],
-                "error": str(e)
-            }
+class EnrichedItem(BaseModel):
+    id: str
+    source: str
+    url: str
+    title: str
+    description: str | None = None
+    content_hash: str
+    published_at: str | None = None
 
-    def analyze_articles_batch(self, articles: List[Dict], max_articles: int = None) -> List[Dict]:
-        """Analyze multiple articles"""
-    #    if max_articles:
-    #        articles = articles[:max_articles]
-        
-        results = []
-        for i, article in enumerate(articles):
-            print(f"Analyzing article {i+1}/{len(articles)}: {article.get('title', 'Unknown')[:100]}...")
-            article_data = self.analyze_article(article)
-            results.append(article_data)
-            
-            # Add delay to avoid rate limiting
-            import time
-            time.sleep(1)
-        
-        return results
+    summary: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    sentiment: str | None = None
 
-def load_news_articles() -> List[Dict]:
-    """Load news articles from JSON files"""
-    articles = []
-    
-    combined_file = f"{OUTPUT_DIR}/all_news_combined.json"
-    if os.path.exists(combined_file):
-        with open(combined_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        if isinstance(data, dict) and 'articles' in data:
-            articles = data['articles']
-        else:
-            articles = data
-    
-    if not articles:
-        json_files = glob.glob(f"{OUTPUT_DIR}/*_news_*.json")
-        for file_path in json_files:
-            if 'all_news' in file_path:
-                continue
-                
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if isinstance(data, dict) and 'articles' in data:
-                articles.extend(data['articles'])
-            else:
-                articles.extend(data)
-    
-    return articles
+prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a concise analyst. Summarize the article in 2-3 sentences, propose 3-5 topical tags, "
+     "and label overall sentiment as Positive/Neutral/Negative."),
+    ("human", "Title: {title}\nDescription: {description}\nURL: {url}\n\nReturn JSON with keys: summary, topics (array), sentiment.")
+])
 
-def save_analysis_results(analysis_results: List[Dict], filename: str = "news_analysis.json"):
-    """Save analysis results to JSON file"""
-    from news_fetcher.config import ANALYSIS_DIR
-    os.makedirs(ANALYSIS_DIR, exist_ok=True)
-    
-    output_path = os.path.join(ANALYSIS_DIR, filename)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(analysis_results, f, indent=2, ensure_ascii=False)
-    
-    print(f"Analysis results saved to: {output_path}")
-    return output_path
+llm = ChatOpenAI(model=MODEL, temperature=0.2)
 
-def generate_summary_report(analysis_results: List[Dict]):
-    """Generate a summary report of all analyses"""
-    summary = {
-        "total_articles_analyzed": len(analysis_results),
-        "sources": {},
-        "common_topics": {},
-        "sentiment_distribution": {},
-        "urgency_distribution": {}
-    }
-    
-    for result in analysis_results:
-        source = result.get('original_source', 'unknown')
-        summary['sources'][source] = summary['sources'].get(source, 0) + 1
-        
-        sentiment = result.get('sentiment', 'unknown')
-        summary['sentiment_distribution'][sentiment] = summary['sentiment_distribution'].get(sentiment, 0) + 1
-        
-        urgency = result.get('urgency', 'unknown')
-        summary['urgency_distribution'][urgency] = summary['urgency_distribution'].get(urgency, 0) + 1
-        
-        for topic in result.get('key_topics', []):
-            summary['common_topics'][topic] = summary['common_topics'].get(topic, 0) + 1
-    
-    summary['common_topics'] = dict(sorted(
-        summary['common_topics'].items(), 
-        key=lambda x: x[1], 
-        reverse=True
-    ))
-    
-    return summary
+@retry(stop=stop_after_attempt(3), wait=wait_exponential_jitter(1.0, 3.0))
+def _call_llm(title: str, description: str | None, url: str) -> dict:
+    chain = prompt | llm
+    resp = chain.invoke({"title": title, "description": description or "", "url": url})
+    # Try to parse JSON from content; if not JSON, heuristic fallback
+    txt = resp.content.strip()
+    try:
+        return json.loads(txt)
+    except Exception:
+        # crude fallback extraction
+        return {"summary": txt[:600], "topics": [], "sentiment": "Neutral"}
 
-def main():
-    """Main analysis function"""
-    if not os.getenv("OPENAI_API_KEY"):
-        print("Error: OPENAI_API_KEY not found in environment variables")
-        print("Please create a .env file with your API key")
+def _iter_latest_jsonl(dirpath: Path) -> Iterable[Path]:
+    files = sorted(dirpath.glob("*.jsonl"), reverse=True)
+    if files:
+        yield files[0]
+
+def main() -> None:
+    in_files = list(_iter_latest_jsonl(INPUT_DIR))
+    if not in_files:
+        print("No input files in news_data/")
         return
-    
-    print("Loading news articles...")
-    articles = load_news_articles()
-    
-    if not articles:
-        print("No articles found. Please run main.py first to fetch news.")
-        return
-    
-    print(f"Found {len(articles)} articles for analysis")
-    
-    # Initialize analyzer
-    analyzer = SimpleNewsAnalyzer(model_name=MODEL)
-    
-    # Analyze articles (limit to 5 for testing)
-    print("\nStarting analysis with OpenAI GPT...")
-    analysis_results = analyzer.analyze_articles_batch(articles)
-    
-    # Save results
-    output_file = save_analysis_results(analysis_results)
-    
-    # Generate summary report
-    summary = generate_summary_report(analysis_results)
-    summary_file = save_analysis_results(summary, "analysis_summary.json")
-    
-    print(f"\nAnalysis complete!")
-    print(f"Articles analyzed: {summary['total_articles_analyzed']}")
-    print(f"Sources: {summary['sources']}")
-    print(f"Sentiment: {summary['sentiment_distribution']}")
-    print(f"Top topics: {list(summary['common_topics'].keys())[:5]}")
+    in_file = in_files[0]
+    out_file = OUT_DIR / in_file.name.replace("news_", "analysis_")
+
+    with in_file.open("r", encoding="utf-8") as fin, out_file.open("w", encoding="utf-8") as fout:
+        for line in fin:
+            raw = json.loads(line)
+            enriched = EnrichedItem(**raw)
+            info = _call_llm(enriched.title, enriched.description, enriched.url)
+            enriched.summary = info.get("summary")
+            enriched.topics = info.get("topics") or []
+            enriched.sentiment = info.get("sentiment") or "Neutral"
+            fout.write(enriched.model_dump_json() + "\n")
+
+    print(f"Wrote enriched data to {out_file}")
 
 if __name__ == "__main__":
     main()
