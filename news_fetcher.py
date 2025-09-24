@@ -4,16 +4,21 @@ news_fetcher.py
 Stage 1: Fetch, normalize, and (optionally) fetch full article text into news_data/ as JSONL.
 
 Highlights:
-- Robust RSS parsing with `feedparser` (gets title/summary/published/content:encoded).
+- Robust RSS parsing with `feedparser`.
 - If full text not in feed, fetch page HTML and extract with `trafilatura`.
-- Async httpx with retries, concurrency limits, and proxy support (trust_env=True).
+- Async httpx with retries, concurrency limits, proxy support (trust_env=True).
 - FEED_URLS in .env (Name|URL[,rss|json]) with ; or newline separators.
-- Controls via .env:
-    CONTENT_FETCH=true          # enable HTML content fetching (default: true)
-    CONTENT_CONCURRENCY=5       # parallel article fetches
-    CONTENT_TIMEOUT=20          # seconds
-    MAX_ARTICLES_PER_SOURCE=50
-    REQUEST_DELAY=0.3
+- Prints per-source stats:
+    • average text length (chars & words)
+    • maximum text length (chars & words)
+
+Env controls (examples):
+  CONTENT_FETCH=true
+  CONTENT_CONCURRENCY=5
+  CONTENT_TIMEOUT=20
+  MAX_ARTICLES_PER_SOURCE=50
+  REQUEST_DELAY=0.3
+  FEED_URLS="BBC-World|https://feeds.bbci.co.uk/news/world/rss.xml,rss;AP-Top|https://www.apnews.com/apf-topnews?output=atom,rss"
 """
 
 from __future__ import annotations
@@ -36,6 +41,12 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import trafilatura
 
+# pretty stats table
+from rich.table import Table
+from rich.console import Console
+from rich import box
+
+console = Console()
 load_dotenv()
 
 DATA_DIR = Path(os.getenv("OUTPUT_DIR", "news_data"))
@@ -84,6 +95,66 @@ def sha256(*parts: str) -> str:
         h.update(p.encode("utf-8"))
     return h.hexdigest()
 
+def _text_for_metrics(a: Article) -> str:
+    """Pick the best available text for metrics (content > description > title)."""
+    return (a.content or a.description or a.title or "").strip()
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+def compute_stats(articles: list[Article]) -> dict[str, dict[str, float]]:
+    """
+    Compute per-source metrics:
+      avg_chars, avg_words, max_chars, max_words, count
+    Returns: { source: {metric: value, ...}, ... }
+    """
+    per: dict[str, list[tuple[int, int]]] = {}
+    for a in articles:
+        t = _text_for_metrics(a)
+        chars = len(t)
+        words = _word_count(t)
+        per.setdefault(a.source, []).append((chars, words))
+
+    stats: dict[str, dict[str, float]] = {}
+    for src, pairs in per.items():
+        if not pairs:
+            continue
+        counts = len(pairs)
+        sum_chars = sum(c for c, _ in pairs)
+        sum_words = sum(w for _, w in pairs)
+        max_chars = max(c for c, _ in pairs)
+        max_words = max(w for _, w in pairs)
+        stats[src] = {
+            "count": counts,
+            "avg_chars": round(sum_chars / counts, 2),
+            "avg_words": round(sum_words / counts, 2),
+            "max_chars": max_chars,
+            "max_words": max_words,
+        }
+    return stats
+
+def print_stats_table(stats: dict[str, dict[str, float]]) -> None:
+    if not stats:
+        console.print("[yellow]No stats to display (no articles).[/yellow]")
+        return
+    table = Table(title="Per-source Text Stats", box=box.SIMPLE_HEAVY)
+    table.add_column("Source", style="cyan", no_wrap=True)
+    table.add_column("Count", justify="right")
+    table.add_column("Avg chars", justify="right")
+    table.add_column("Avg words", justify="right")
+    table.add_column("Max chars", justify="right")
+    table.add_column("Max words", justify="right")
+    for src, s in sorted(stats.items()):
+        table.add_row(
+            src,
+            str(int(s["count"])),
+            f'{s["avg_chars"]:.2f}',
+            f'{s["avg_words"]:.2f}',
+            str(int(s["max_chars"])),
+            str(int(s["max_words"])),
+        )
+    console.print(table)
+
 # ---- Source adapters ---------------------------------------------------------
 
 @dataclass
@@ -93,9 +164,10 @@ class Source:
     kind: str = "rss"   # "rss" | "json"
 
 def _default_sources() -> list[Source]:
+    # Swapped CNN -> AP Top (more up-to-date feed)
     return [
         Source(name="BBC-World", url="https://feeds.bbci.co.uk/news/world/rss.xml", kind="rss"),
-        Source(name="CNN-Top", url="http://rss.cnn.com/rss/edition.rss", kind="rss"),
+        Source(name="AP-Top", url="https://www.apnews.com/apf-topnews?output=atom", kind="rss"),
     ]
 
 ENTRY_SPLIT_RE = re.compile(r"[;\n]|,(?=(?:[^\"']|\"[^\"]*\"|'[^']*')*$)")
@@ -179,12 +251,11 @@ def _from_feed_entry(entry, src_name: str) -> Article:
     # content:encoded or content[] blocks
     content_text = None
     if "content" in entry and isinstance(entry["content"], list):
-        # choose the longest text block
         blocks = [c.get("value") for c in entry["content"] if isinstance(c, dict) and c.get("value")]
         if blocks:
             content_text = max(blocks, key=lambda t: len(t))
 
-    # basic cleanup for description/content (strip tags roughly)
+    # strip tags roughly
     if description:
         description = re.sub("<.*?>", "", description).strip() or None
     if content_text:
@@ -218,7 +289,7 @@ async def parse_feed(client: httpx.AsyncClient, src: Source) -> list[Article]:
 
 async def enrich_with_fulltext(client: httpx.AsyncClient, article: Article, semaphore: asyncio.Semaphore) -> None:
     """Fill article.content if empty by fetching HTML and extracting main text."""
-    if article.content and len(article.content) > 400:  # already have decent content
+    if article.content and len(article.content) > 400:
         return
     if not CONTENT_FETCH:
         return
@@ -231,10 +302,8 @@ async def enrich_with_fulltext(client: httpx.AsyncClient, article: Article, sema
             return
 
         try:
-            # Trafilatura: extract readable text; pass url for better heuristics
             text = trafilatura.extract(html, url=article.url, include_comments=False, include_tables=False)
             if text:
-                # Filter out super short pages or nav-only junk
                 clean = text.strip()
                 if len(clean) >= 400:
                     article.content = clean
@@ -304,8 +373,13 @@ def write_jsonl(articles: list[Article]) -> Optional[Path]:
     return fp
 
 def main() -> None:
-    log(f"Starting fetch for {len(SOURCES)} sources (content_fetch={CONTENT_FETCH})")
+    console.print(f"[bold]Starting fetch for {len(SOURCES)} sources[/bold] (content_fetch={CONTENT_FETCH})")
     arts = asyncio.run(gather_all())
+
+    # Print per-source stats (chars/words avg & max)
+    stats = compute_stats(arts)
+    print_stats_table(stats)
+
     path = write_jsonl(arts)
     if path:
         have_full = sum(1 for a in arts if a.content and len(a.content) >= 400)
