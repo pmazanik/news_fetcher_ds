@@ -45,6 +45,7 @@ Fetch from multiple RSS sources, extract full article text, summarize/tag with O
 2. **Analyze** – `analysis.py` (via **LangChain**)
 
    * For each article: generate **summary**, **topics**, and **sentiment** using your OpenAI model
+   * **Token-safe**: if an article is short, do a single-shot summary. If it’s long, **chunk** it into overlapping parts, **summarize each chunk**, then **combine** into one final JSON (**summary**, **topics**, **sentiment**).
    * Progress bar, periodic throughput logs, and a final summary
    * Write JSONL to `analysis_results/`
 
@@ -150,6 +151,14 @@ CONTENT_TIMEOUT=20
 ANALYSIS_LOG_EVERY=50
 ANALYSIS_MAX_ITEMS=0   # 0 = process all
 
+# Token-safe chunking controls (character-based)
+# If article length <= ANALYSIS_SINGLE_SHOT_CHARS -> single-shot
+# Otherwise -> chunk into ANALYSIS_CHUNK_CHARS with ANALYSIS_CHUNK_OVERLAP, then combine
+ANALYSIS_SINGLE_SHOT_CHARS=12000
+ANALYSIS_CHUNK_CHARS=6000
+ANALYSIS_CHUNK_OVERLAP=500
+ANALYSIS_MAX_CHUNKS=10
+
 # ========= News sources =========
 # Use ; or newlines between entries. Each entry: Name|URL,rss
 # Keep the opening and closing quote, and avoid trailing separators.
@@ -221,9 +230,23 @@ Per-source Text Stats
 python analysis.py
 ```
 
-* Uses **LangChain** (`ChatOpenAI`) to generate a brief summary, 3–5 topical tags, and a sentiment label.
-* Prefers full article text when available (then description/title).
-* Shows a progress bar + periodic throughput, and a final summary; writes to `analysis_results/`.
+* Uses **LangChain** (`ChatOpenAI`) for enrichment.
+* **Token-safe behavior**:
+
+  * If the article text is **short** (≤ `ANALYSIS_SINGLE_SHOT_CHARS`), the model gets the whole text in **one call** and returns JSON.
+  * If the article text is **long**, the script:
+
+    1. **Chunks** the text into overlapping pieces (`ANALYSIS_CHUNK_CHARS`, overlap `ANALYSIS_CHUNK_OVERLAP`),
+    2. **Summarizes** each chunk (2–3 sentences),
+    3. **Combines** those mini-summaries into **one** JSON result: `summary`, `topics[]`, `sentiment`.
+* Shows a progress bar + periodic throughput, and a final summary.
+* Writes to `analysis_results/analysis_*.jsonl`.
+
+* **Tuning common cases**
+
+* Use a smaller-context model → **lower** `ANALYSIS_SINGLE_SHOT_CHARS` and `ANALYSIS_CHUNK_CHARS`.
+* Extremely long articles → you can **raise** `ANALYSIS_MAX_CHUNKS` slightly (e.g., 12), but remember the combine step also needs room.
+
 
 ### Interactive Search (Auto-build + RAG)
 
@@ -387,6 +410,9 @@ docker run --rm -it \
 
 * The fetcher prints **per-source text stats** (avg/max chars & words) so you can quickly see which feeds yield fuller articles.
 * `analysis.py` shows a progress bar with periodic throughput; tweak `ANALYSIS_LOG_EVERY`.
+* Smaller-context models → lower `ANALYSIS_SINGLE_SHOT_CHARS` and `ANALYSIS_CHUNK_CHARS`.
+* Keep overlap \~10–20% of chunk size.
+* `ANALYSIS_MAX_CHUNKS` caps the number of chunk summaries sent to the combine step.
 * `search_interface.py` **auto-builds** on first run if needed; use `/rebuild` after new analyses.
 
 ---
@@ -394,3 +420,4 @@ docker run --rm -it \
 ## License
 
 **MIT** — see `LICENSE` (or the repo’s license section).
+
