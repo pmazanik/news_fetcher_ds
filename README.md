@@ -1,85 +1,91 @@
-# News Fetcher & Semantic Search
+# News Fetcher & Semantic Search (LangChain + Chroma)
 
-AI-powered news aggregation + LLM analysis + semantic search.
-The pipeline fetches articles from multiple sources, summarizes/tags them with OpenAI, builds a lightweight on-disk vector index, and lets you query in natural language from an interactive CLI.
+AI-powered news aggregation with full-text extraction, LLM analysis, and semantic search.
+Fetch from multiple RSS sources, extract full article text, summarize/tag with OpenAI via **LangChain**, store embeddings in **ChromaDB**, and query from an interactive CLI.
 
-* Python 3.9+ (3.11 recommended)
-* Runs locally or in Docker
-* Zero infra: vectors + metadata stored as JSON on disk
+* **Python 3.11**
+* **LangChain** for LLM orchestration (summaries, Q\&A)
+* **ChromaDB** for a local, persistent vector store (no external DB required)
+* **feedparser + trafilatura** for robust feed parsing & article text extraction
+* **Rich / tqdm** for friendly progress & stats
+* **Pytest** with helpful test header/summary
 
 ---
 
 ## Table of Contents
 
-* [Overview](#overview)
 * [Architecture](#architecture)
-* [Repository Layout](#repository-layout)
+* [Project Layout](#project-layout)
 * [Requirements](#requirements)
 * [Setup (Local)](#setup-local)
+* [Environment (.env)](#environment-env)
 * [Quick Start](#quick-start)
 * [Usage](#usage)
-* [Configuration](#configuration)
-* [Data & Folders](#data--folders)
+
+  * [Fetching (with per-source text stats)](#fetching-with-per-source-text-stats)
+  * [Analysis (LLM summaries/tags/sentiment)](#analysis-llm-summariestagssentiment)
+  * [Interactive Search (Auto-build + RAG)](#interactive-search-auto-build--rag)
 * [Testing](#testing)
 * [Docker (Build & Run)](#docker-build--run)
 * [Troubleshooting](#troubleshooting)
-* [Roadmap](#roadmap)
-* [Costs](#costs)
+* [Notes & Tips](#notes--tips)
 * [License](#license)
-
----
-
-## Overview
-
-**What it does**
-
-* Fetches news from several curated sources.
-* Uses an OpenAI model to produce **summary**, **topics**, **sentiment** (and other light analysis).
-* Creates **embeddings** for each article and stores everything in a single JSON “vector DB”.
-* Provides an **interactive CLI** for semantic `/search` and Q\&A `/ask` over the corpus.
-
-**Who it’s for**
-
-* Developers/researchers prototyping a news intelligence/search workflow.
-* Teams that want a simple, portable RAG-style baseline without maintaining a DB service.
 
 ---
 
 ## Architecture
 
-1. **Fetch** — `news_fetcher.py` pulls and normalizes articles into `news_data/`.
-2. **Analyze** — `analysis.py` calls OpenAI to summarize/tag/sentiment, writing JSON into `analysis_results/`.
-3. **Embed + Index** — `vector_db.py` creates embeddings and writes a **single JSON** index into `vector_db/`.
-4. **Query** — `search_interface.py` loads the index and serves an **interactive CLI** (semantic search & simple RAG).
+1. **Fetch** – `news_fetcher.py`
+
+   * Read RSS feeds, normalize items (title/desc/link/date)
+   * Try `<content:encoded>`; if missing, fetch the article HTML and **extract full text** via `trafilatura`
+   * Write JSONL to `news_data/`
+   * Print **per-source text stats** (avg/max chars & words)
+
+2. **Analyze** – `analysis.py` (via **LangChain**)
+
+   * For each article: generate **summary**, **topics**, and **sentiment** using your OpenAI model
+   * Progress bar, periodic throughput logs, and a final summary
+   * Write JSONL to `analysis_results/`
+
+3. **Embed & Index** – `vector_db.py` (OpenAI embeddings → **ChromaDB**)
+
+   * Build a **persistent** local collection under `chroma_db/`
+   * Metadata sanitized for Chroma (lists → comma-separated strings, telemetry disabled)
+
+4. **Query** – `search_interface.py`
+
+   * Interactive CLI with `/search`, `/ask` (RAG over retrieved context), `/stats`, `/rebuild`
+   * **Auto-builds** vectors on first run if the collection is empty
 
 ---
 
-## Repository Layout
+## Project Layout
 
 ```
 news_fetcher_ds/
-├─ news_fetcher/           # core package: configs/utilities/fetch helpers
-├─ news_fetcher.py         # stage 1: fetch sources → news_data/
-├─ analysis.py             # stage 2: LLM analysis → analysis_results/
-├─ vector_db.py            # stage 3: embeddings + on-disk index (JSON) → vector_db/
-├─ search_interface.py     # stage 4: interactive CLI (/search, /ask, /stats, /help)
-├─ check_data.py           # quick sanity checks
-├─ view_news.py            # pretty-print/inspect combined items
-├─ requirements.txt        # dependancies list
-├─ .env.example            # environment setting example file
-├─ basic_test.py
-├─ test_integration.py
-├─ test_performance.py
-├─ test_semantic.py
-└─ README.md
+├─ news_fetcher.py          # Stage 1: fetch feeds → news_data/, full-text extraction, per-source stats
+├─ analysis.py              # Stage 2: LLM summaries/tags/sentiment → analysis_results/
+├─ vector_db.py             # Stage 3: embeddings + ChromaDB (persistent in chroma_db/)
+├─ search_interface.py      # Stage 4: interactive CLI (auto-build; /search, /ask, /stats, /rebuild)
+├─ tests/
+│  ├─ test_metadata.py
+│  ├─ test_stats.py
+│  └─ test_utils.py
+├─ tests/conftest.py        # import shim + nice pytest header/summary
+├─ pytest.ini               # informative defaults (-vv, durations)
+├─ requirements.txt         # all dependencies
+├─ .env.example             # sample configuration (copy to .env and edit)
+└─ README.md                # this file
 ```
+
 ---
 
 ## Requirements
 
-* **Python**: 3.9+ (3.11 recommended)
-* **OpenAI API key** (for both analysis and embeddings)
-* macOS/Linux/Windows supported
+* **Python** 3.11
+* **OpenAI API key** (for analysis & embeddings)
+* macOS / Linux / Windows
 
 ---
 
@@ -90,7 +96,7 @@ news_fetcher_ds/
 git clone https://github.com/pmazanik/news_fetcher_ds.git
 cd news_fetcher_ds
 
-# 2) Create & activate venv (optional)
+# 2) Create & activate venv (optional but recommended)
 python -m venv .venv
 # macOS/Linux
 source .venv/bin/activate
@@ -101,156 +107,194 @@ source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 
-# 4) Configure env
+# 4) Configure environment
 cp .env.example .env
-# edit .env and add your OPENAI_API_KEY and other options
+# open .env and set OPENAI_API_KEY and FEED_URLS (see below)
 ```
+
+---
+
+## Environment (.env)
+
+Here’s a **complete** example you can paste into `.env`. `FEED_URLS` is multi-line for clarity; entries are `Name|URL,rss` separated by semicolons/newlines.
+
+```env
+# ========= OpenAI =========
+OPENAI_API_KEY=sk-REPLACE_ME
+
+# Models
+MODEL=gpt-4o-mini
+EMBEDDING_MODEL=text-embedding-3-small
+
+# ========= IO Paths =========
+OUTPUT_DIR=news_data
+ANALYSIS_DIR=analysis_results
+
+# ========= Vector DB (Chroma) =========
+CHROMA_DIR=chroma_db
+CHROMA_COLLECTION=news_articles
+# Auto-build index on first launch of search_interface.py if empty
+AUTO_BUILD=true
+
+# ========= Fetcher runtime =========
+USER_AGENT=news-fetcher/1.0 (+https://example.local)
+REQUEST_DELAY=0.3
+MAX_ARTICLES_PER_SOURCE=50
+
+# Full-text extraction settings
+CONTENT_FETCH=true
+CONTENT_CONCURRENCY=5
+CONTENT_TIMEOUT=20
+
+# ========= Analysis runtime =========
+ANALYSIS_LOG_EVERY=50
+ANALYSIS_MAX_ITEMS=0   # 0 = process all
+
+# ========= News sources =========
+# Use ; or newlines between entries. Each entry: Name|URL,rss
+# Keep the opening and closing quote, and avoid trailing separators.
+FEED_URLS="BBC-World|https://feeds.bbci.co.uk/news/world/rss.xml,rss;
+Guardian-World|https://www.theguardian.com/world/rss,rss;
+AlJazeera|https://www.aljazeera.com/xml/rss/all.xml,rss;
+DW-Top|https://rss.dw.com/rdf/rss-en-top,rss"
+```
+
+> Tip: You can omit `FEED_URLS` to use defaults, but the above is recommended.
+> Some sources (e.g., AP, NPR) may not provide stable public RSS; if a source returns 0 items, swap it out.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1) Fetch articles
+# 1) Fetch (RSS + full-text extraction)
 python news_fetcher.py
 
-# 2) Analyze with OpenAI (summaries, topics, sentiment)
+# 2) Analyze (LLM summaries, topics, sentiment)
 python analysis.py
 
-# 3) Open the interactive semantic search
+# 3) Interactive search (auto-builds vectors if empty)
 python search_interface.py
+```
 
-# Try commands in the CLI:
-# /search climate change policy
-# /ask "What did Reuters say about rate cuts?"
-# /stats
-# /help
+In the CLI, try:
+
+```
+/search central bank inflation
+/ask "What did BBC report today?"
+/stats
+/rebuild
+/help
 ```
 
 ---
 
 ## Usage
 
-### Fetch
+### Fetching (with per-source text stats)
 
 ```bash
 python news_fetcher.py
 ```
 
-* Reads configured sources from the package.
-* Writes normalized raw items into `news_data/`.
+* Parses RSS via **feedparser**; if the feed lacks full text, fetches HTML and extracts with **trafilatura**.
+* Writes JSONL files into `news_data/` like `news_YYYYMMDD_HHMMSS.jsonl`.
+* Prints a **Per-source Text Stats** table:
 
-### Analyze
+```
+Per-source Text Stats
+┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┓
+┃ Source     ┃ Count ┃ Avg chars┃ Avg words┃ Max chars┃ Max words┃
+┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━┩
+│ BBC-World  │   44  │  5700.34 │   920.55 │    19876 │     3291 │
+│ Guardian…  │   45  │  6201.77 │  1001.23 │    24310 │     4152 │
+│ AlJazeera  │   25  │  5402.10 │   870.02 │    20144 │     3420 │
+│ DW-Top     │   50  │  4980.05 │   801.41 │    18990 │     3108 │
+└────────────┴───────┴──────────┴──────────┴──────────┴──────────┘
+```
+
+> If a source fails DNS or returns 0 items, it’s logged and the run **continues**.
+
+### Analysis (LLM summaries/tags/sentiment)
 
 ```bash
 python analysis.py
 ```
 
-* Requires `OPENAI_API_KEY`.
-* Adds `summary`, `topics`, `sentiment`.
-* Outputs per-item JSON files in `analysis_results/`.
+* Uses **LangChain** (`ChatOpenAI`) to generate a brief summary, 3–5 topical tags, and a sentiment label.
+* Prefers full article text when available (then description/title).
+* Shows a progress bar + periodic throughput, and a final summary; writes to `analysis_results/`.
 
-### Build/Query (vector DB)
-
-```bash
-# The CLI calls this under the hood, but you can use the module directly, e.g.:
-python -c "from vector_db import PurePythonVectorDB as DB; d=DB(); d.load_from_disk('vector_db'); print(d.stats())"
-```
-
-* Stores an **index.json** (or similar) under `vector_db/` with:
-
-  * header: `embedding_model`, `dimension`, counts, build params
-  * `items[]`: metadata + `vector: [float, ...]` (normalized), optional `text_hash`
-
-### Interactive CLI
+### Interactive Search (Auto-build + RAG)
 
 ```bash
 python search_interface.py
-# /search your query text
-# /ask "your question"
-# /stats
-# /help
-# /quit
 ```
 
-### Utilities
-
-```bash
-python check_data.py   # quick counts, existence checks
-python view_news.py    # pretty prints combined article info
-```
-
----
-
-## Configuration
-
-Either use environment variables or a `.env` file (copy from `.env.example`). Typical settings:
-
-* `OPENAI_API_KEY` — **required**
-* `MODEL` — LLM for analysis (e.g., `gpt-4o-mini`)
-* `EMBEDDING_MODEL` — embeddings model (e.g., `text-embedding-3-small`)
-* `MAX_ARTICLES_PER_SOURCE` — cap per source (e.g., `20`)
-* `REQUEST_DELAY` — polite delay between requests (seconds; e.g., `1.0`)
-* (optional) `OUTPUT_DIR`, `ANALYSIS_DIR`, `VECTOR_DB_DIR` — override default folders
-
----
-
-## Data & Folders
-
-* `news_data/` — raw fetched items (JSON)
-* `analysis_results/` — LLM analysis outputs (JSON)
-* `vector_db/` — single-file vector index + metadata (JSON)
-
-Mount/persist these when running in Docker to avoid recomputing.
+* If the Chroma collection is empty, it **auto-builds** from the latest `analysis_results/*.jsonl`.
+* `/search <text>` returns top-k semantic matches.
+* `/ask "your question"` performs a simple **RAG**: retrieve context → answer with LangChain ChatOpenAI.
+* `/stats` shows Chroma collection + points; `/rebuild` forces a re-index from latest analysis.
 
 ---
 
 ## Testing
 
-* basic_test.py - Contains quick smoke tests to check that the core modules (news_fetcher.py, analysis.py, vector_db.py) can be imported and run without errors.
-* test_integration.py - Exercises the full pipeline: fetch → analyze → embed → search.
-Ensures that data flows correctly between stages and that directories (news_data/, analysis_results/, vector_db/) are populated as expected.
-* test_performance.py - Benchmarks embedding and search speed on sample datasets.
-Helps detect regressions when scaling to more documents.
-* test_semantic.py - Validates the semantic search logic in vector_db.py.
-Checks that similar queries return related articles and that cosine similarity is calculated consistently.
+We ship a lightweight test suite (no network calls):
+
+```bash
+pytest
+# or, with defaults: -vv -ra --durations=5 (from pytest.ini)
+```
+
+What you’ll see:
+
+* A header with Python & key package versions, model/env toggles, and FEED\_URLS count
+* Verbose test names and slowest tests
+* A compact end-of-run summary (totals, elapsed)
+
+Tests include:
+
+* `tests/test_utils.py` – URL canonicalization & hashing
+* `tests/test_stats.py` – per-source text metrics
+* `tests/test_metadata.py` – Chroma metadata sanitization (lists → string, None drop)
+
+> We preload `news_fetcher.py` & `vector_db.py` for import reliability in `tests/conftest.py`, and disable Chroma telemetry in tests.
 
 ---
 
 ## Docker (Build & Run)
 
-### 1) Dockerfile (basic)
+**Dockerfile** (save as `Dockerfile` at repo root):
 
 ```dockerfile
-# Dockerfile
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# System deps (minimal)
+# Minimal system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install deps first (leverage layer caching)
+# Install deps first (layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest
+# Copy the app
 COPY . .
-
-# Non-root user for safety
+# Non-root user
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
-# Default command: open the interactive search CLI
+# Default: open the interactive search
 CMD ["python", "search_interface.py"]
 ```
 
-> Tip: also create a `.dockerignore`:
+**.dockerignore** (recommended):
 
 ```
 .venv
@@ -259,113 +303,94 @@ __pycache__
 .env
 news_data/
 analysis_results/
-vector_db/
+chroma_db/
 ```
 
-### 2) Build
+**Build:**
 
 ```bash
 docker build -t news-fetcher .
 ```
 
-### 3) Run each stage (with persistent volumes)
-
-> Create local folders once:
+**Create host folders once:**
 
 ```bash
-mkdir -p news_data analysis_results vector_db
+mkdir -p news_data analysis_results chroma_db
 ```
 
-**Fetch**
+**Run fetch:**
 
 ```bash
 docker run --rm -it \
   --env-file .env \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
-  -v "$(pwd)/vector_db:/app/vector_db" \
+  -v "$(pwd)/chroma_db:/app/chroma_db" \
   news-fetcher \
   python news_fetcher.py
 ```
 
-**Analyze**
+**Run analysis:**
 
 ```bash
 docker run --rm -it \
   --env-file .env \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
-  -v "$(pwd)/vector_db:/app/vector_db" \
+  -v "$(pwd)/chroma_db:/app/chroma_db" \
   news-fetcher \
   python analysis.py
 ```
 
-**Interactive Search**
+**Interactive search:**
 
 ```bash
 docker run --rm -it \
   --env-file .env \
   -v "$(pwd)/news_data:/app/news_data" \
   -v "$(pwd)/analysis_results:/app/analysis_results" \
-  -v "$(pwd)/vector_db:/app/vector_db" \
+  -v "$(pwd)/chroma_db:/app/chroma_db" \
   news-fetcher
-# then type /search, /ask, /stats ...
+# then type /search, /ask, /stats, /rebuild
 ```
 
-You can override envs inline instead of `--env-file .env`, e.g. `-e OPENAI_API_KEY=...`.
+> You can also override single envs without `--env-file`, e.g. `-e OPENAI_API_KEY=...`.
 
 ---
 
 ## Troubleshooting
 
-* **Missing `OPENAI_API_KEY`** → set it in `.env` or pass with `-e OPENAI_API_KEY=...`.
-* **Slow or rate-limited analysis** → lower `MAX_ARTICLES_PER_SOURCE`, increase `REQUEST_DELAY`.
-* **Empty search results** → ensure you ran **both** fetch and analysis before opening the CLI.
-* **Model mismatch** → don’t mix different `EMBEDDING_MODEL`s in the same index; rebuild if you change it.
-* **Windows terminal encoding** → use PowerShell and ensure UTF-8 (e.g., `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()`).
+* **DNS / connect errors** during fetch
+
+  * Verify your network/proxy; the fetcher honors `HTTP(S)_PROXY` via `httpx.AsyncClient(trust_env=True)`.
+  * If one source fails, others still proceed; swap or remove problematic feeds in `.env`.
+
+* **No items for a source**
+
+  * Some outlets don’t maintain public RSS or block bots. Replace with alternatives (BBC, Guardian, Al Jazeera, DW, etc.).
+
+* **Telemetry messages from Chroma**
+
+  * We hard-disable Chroma/PostHog telemetry in `vector_db.py` (envs + logger) so the CLI stays clean.
+
+* **Changed embedding model**
+
+  * If you switch `EMBEDDING_MODEL`, clear or change `CHROMA_COLLECTION` and rebuild (`/rebuild`).
+
+* **Costs / rate limits**
+
+  * Limit items via `MAX_ARTICLES_PER_SOURCE` and run analysis in batches (also `ANALYSIS_MAX_ITEMS`).
 
 ---
 
-## Roadmap
+## Notes & Tips
 
-- **Vector search improvements**  
-  - Replace the current pure-Python linear scan with a high-performance ANN (Approximate Nearest Neighbor) index such as **FAISS** or **hnswlib**.  
-  - Add support for external vector database solutions (**Qdrant**, **Weaviate**, **Pinecone**) to enable scalability beyond tens of thousands of articles.  
-
-- **Framework integration**  
-  - Introduce the **LangChain** framework to standardize prompt management, enable Retrieval-Augmented Generation (RAG) pipelines, and simplify orchestration of LLM calls.  
-  - Use LangChain retrievers to connect seamlessly with both local and external vector stores.  
-
-- **Enhanced querying**  
-  - Add **metadata filtering** (e.g., by source, publication date, sentiment) directly in the CLI or via LangChain retrievers.  
-  - Support hybrid search (semantic + keyword) for more precise results.  
-
-- **Performance & efficiency**  
-  - Implement **embedding caching** keyed by content hash to avoid redundant API calls.  
-  - Allow **incremental updates** to the index instead of full rebuilds.  
-
-- **User experience**  
-  - Develop a lightweight **web UI** in addition to the CLI for easier browsing and search.  
-  - Provide **Docker Compose** setups for one-command pipeline execution (fetch → analyze → search).
- 
----
-
-## Costs
-
-With current limit as 20 articles per source approximate cost of full run is 0.09 USD
+* The fetcher prints **per-source text stats** (avg/max chars & words) so you can quickly see which feeds yield fuller articles.
+* `analysis.py` shows a progress bar with periodic throughput; tweak `ANALYSIS_LOG_EVERY`.
+* `search_interface.py` **auto-builds** on first run if needed; use `/rebuild` after new analyses.
 
 ---
 
 ## License
 
-MIT
-
----
-
-## Basic Docker Instructions (recap)
-
-1. Put the **Dockerfile** (above) in repo root.
-2. `docker build -t news-fetcher .`
-3. Create local data dirs and a `.env` with your `OPENAI_API_KEY`.
-4. Run **fetch**, then **analyze**, then start the default **search** container (commands above).
-
+**MIT** — see `LICENSE` (or the repo’s license section).
