@@ -35,6 +35,6 @@ venv.bak/
 .env.production.local
 
 #Project specific
-vector_db/
+chroma_db/
 analysis_results/
 news_data
